@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar as CalendarIcon, Users, ChevronLeft, ChevronRight, Info, Coffee, Trophy, MapPin, CalendarDays, LayoutGrid, List } from 'lucide-react';
 
 // Raw schedule data
@@ -79,6 +79,17 @@ export default function App() {
   const [selectedTeam, setSelectedTeam] = useState('All Teams');
   const [gameWeekMode, setGameWeekMode] = useState(false);
   const [highlightedDate, setHighlightedDate] = useState(null);
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
+  const [activeMobileMonth, setActiveMobileMonth] = useState(0); // 0=Mar … 3=Jun
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    setIsMobile(mq.matches);
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Filtering Logic
   const filteredSchedule = useMemo(() => {
@@ -125,11 +136,83 @@ export default function App() {
 
   const handleFixtureClick = (dateStr) => {
     setHighlightedDate(dateStr);
-    const el = document.getElementById(`cal-date-${dateStr}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (isMobile) {
+      // Just switch the mini strip to the correct month — no calendar expand
+      const parsed = parseDate(dateStr);
+      const idx = monthsToRender.findIndex(m => m.getMonth() === parsed.getMonth());
+      if (idx >= 0) setActiveMobileMonth(idx);
+    } else {
+      // The mobile expanded calendar renders the same renderMonth() and therefore
+      // produces duplicate cal-date-* IDs earlier in the DOM. getElementById finds
+      // those hidden elements first, making scrollIntoView a no-op. Use
+      // querySelectorAll + offsetParent to reach the visible desktop cell.
+      const allEls = document.querySelectorAll(`[id="cal-date-${dateStr}"]`);
+      const visibleEl = Array.from(allEls).find(el => el.offsetParent !== null);
+      if (visibleEl) visibleEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     setTimeout(() => setHighlightedDate(null), 2500);
+  };
+
+  const handleMiniCalendarClick = (dateStr) => {
+    setHighlightedDate(dateStr);
+    const el = document.querySelector(`[data-fixture-date="${dateStr}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => setHighlightedDate(null), 2500);
+  };
+
+  // Mini calendar dot colour (mirrors getBlockColors but returns a bg class for the dot)
+  const getDotColor = (block, isBuffer) => {
+    if (isBuffer) return 'bg-red-400';
+    switch (block) {
+      case 'Block 1': return 'bg-blue-400';
+      case 'Block 2': return 'bg-emerald-400';
+      case 'Block 3': return 'bg-purple-400';
+      default: return 'bg-gray-400';
+    }
+  };
+
+  // Renders compact 7-col grid for the currently active mobile month
+  const renderMiniCalendar = () => {
+    const monthDate = monthsToRender[activeMobileMonth];
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+
+    const cells = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+      cells.push(<div key={`e-${i}`} />);
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${d.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`;
+      const dayEvents = processedSchedule.filter(e => e.date === dateStr);
+      const hasEvents = dayEvents.length > 0;
+      const isBuffer = dayEvents.some(e => e.isBuffer);
+      const eventBlock = hasEvents ? dayEvents[0].block : null;
+      const isHighlightActive = highlightedDate === dateStr;
+
+      // Dim when a team is selected and this day's events don't involve them
+      const isRelevant = !hasEvents || selectedTeam === 'All Teams' ||
+        dayEvents.some(e => e.isBuffer || e.team1 === selectedTeam || e.team2 === selectedTeam);
+
+      cells.push(
+        <div
+          key={d}
+          onClick={() => hasEvents ? handleMiniCalendarClick(dateStr) : undefined}
+          className={`flex flex-col items-center justify-center h-9 rounded-lg transition-all duration-200
+            ${hasEvents ? 'cursor-pointer hover:bg-gray-50' : ''}
+            ${isHighlightActive ? 'ring-2 ring-[#0076CE] bg-[#0076CE]/10' : ''}
+            ${!isRelevant ? 'opacity-30' : ''}
+          `}
+        >
+          <span className={`text-[10px] font-semibold leading-none ${hasEvents ? 'text-slate-800' : 'text-gray-400'}`}>{d}</span>
+          {hasEvents && (
+            <span className={`mt-0.5 w-1.5 h-1.5 rounded-full ${getDotColor(eventBlock, isBuffer)} ${isHighlightActive ? 'animate-pulse' : ''}`} />
+          )}
+        </div>
+      );
+    }
+    return cells;
   };
 
   // Calendar Rendering Helpers
@@ -293,7 +376,7 @@ export default function App() {
       <header className="bg-white py-6 px-4 sm:px-6 lg:px-8 shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-4">
-            <img src="Asset 6@Banner2.png" alt="Ultimate Frisbee Association" className="h-12 md:h-16 object-contain" />
+            <img src="/ufa-logo.png" alt="Ultimate Frisbee Association" className="h-12 md:h-16 object-contain" />
             <div className="hidden md:flex items-center gap-1 text-xs font-semibold text-[#0076CE] bg-[#0076CE]/10 px-3 py-1 rounded-full">
               <MapPin size={12} /> Villingili
             </div>
@@ -337,9 +420,101 @@ export default function App() {
           </div>
         </div>
 
+        {/* Mobile Mini Calendar Strip — hidden on desktop */}
+        <div className="lg:hidden mb-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
+
+            {/* Month navigation */}
+            <div className="flex items-center justify-between mb-3">
+              <button
+                onClick={() => setActiveMobileMonth(m => Math.max(0, m - 1))}
+                disabled={activeMobileMonth === 0}
+                className="p-1.5 rounded-lg disabled:opacity-30 hover:bg-gray-100 transition-colors"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-slate-800">
+                  {monthsToRender[activeMobileMonth].toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </span>
+                <button
+                  onClick={() => setGameWeekMode(!gameWeekMode)}
+                  className="flex items-center gap-1 px-2 py-1 bg-[#0076CE]/10 hover:bg-[#0076CE]/20 text-[#0076CE] text-[10px] font-bold rounded-md transition-colors"
+                >
+                  {gameWeekMode ? <LayoutGrid size={11} /> : <List size={11} />}
+                  {gameWeekMode ? 'Grid' : 'List'}
+                </button>
+              </div>
+              <button
+                onClick={() => setActiveMobileMonth(m => Math.min(3, m + 1))}
+                disabled={activeMobileMonth === 3}
+                className="p-1.5 rounded-lg disabled:opacity-30 hover:bg-gray-100 transition-colors"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+
+            {/* Day-of-week headers */}
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {['S','M','T','W','T','F','S'].map((d, i) => (
+                <div key={i} className="text-center text-[9px] font-semibold text-slate-400 uppercase">{d}</div>
+              ))}
+            </div>
+
+            {/* Mini calendar grid */}
+            <div className="grid grid-cols-7 gap-1">
+              {renderMiniCalendar()}
+            </div>
+
+            {/* Block colour legend */}
+            <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-gray-100 text-[10px] text-gray-600">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" /> Block 1</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" /> Block 2</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-400 shrink-0" /> Block 3</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 shrink-0" /> Holiday</span>
+            </div>
+
+            {/* Expand / collapse full calendar */}
+            <button
+              onClick={() => setCalendarExpanded(v => !v)}
+              className="mt-3 w-full text-center text-xs font-semibold text-[#0076CE] py-2 rounded-lg hover:bg-[#0076CE]/5 transition-colors flex items-center justify-center gap-1.5 border border-[#0076CE]/20"
+            >
+              <CalendarDays size={13} />
+              {calendarExpanded ? 'Hide Full Calendar' : 'View Full Calendar'}
+            </button>
+
+            {/* Collapsible full calendar */}
+            <div
+              className="overflow-hidden transition-all duration-500"
+              style={{ maxHeight: calendarExpanded ? '2000px' : '0px' }}
+            >
+              <div className="mt-4 pt-4 border-t border-gray-100 space-y-8 overflow-y-auto custom-scrollbar" style={{ maxHeight: '60vh' }}>
+                {monthsToRender.map(monthDate => (
+                  <div key={monthDate.getTime()}>
+                    <h3 className="text-base font-bold mb-2 sticky top-0 bg-white/95 backdrop-blur py-1.5 z-10 text-slate-800 border-b border-gray-100">
+                      {monthDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                    </h3>
+                    {!gameWeekMode && (
+                      <div className="grid grid-cols-7 gap-0.5 mb-1">
+                        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                          <div key={d} className="text-center text-[8px] font-semibold text-slate-400 py-0.5 uppercase">{d}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className={gameWeekMode ? 'space-y-2' : 'grid grid-cols-7 gap-0.5'}>
+                      {renderMonth(monthDate)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column: Calendar */}
-          <div className="lg:col-span-2 space-y-6">
+          {/* Left Column: Calendar — desktop only */}
+          <div className="hidden lg:block lg:col-span-2 space-y-6">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col h-[85vh]">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
@@ -418,9 +593,10 @@ export default function App() {
                       )}
 
                       {/* Buffer/Holiday Card or Match Card */}
-                      <div 
+                      <div
+                        data-fixture-date={item.originalDate}
                         onClick={() => handleFixtureClick(item.date)}
-                        className={`relative z-10 rounded-lg p-3 border transition-all duration-300 cursor-pointer hover:shadow-md 
+                        className={`relative z-10 rounded-lg p-3 border transition-all duration-300 cursor-pointer hover:shadow-md
                           ${item.isBuffer ? 'bg-red-50/50 border-red-200' : 'bg-white border-gray-200'} 
                           ${isHighlightActive ? 'ring-2 ring-[#0076CE] shadow-lg border-[#0076CE] scale-[1.02]' : 'hover:border-[#0076CE]/40'}
                         `}
