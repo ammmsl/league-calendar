@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar as CalendarIcon, Users, ChevronLeft, ChevronRight, Info, Coffee, Trophy, MapPin, CalendarDays, LayoutGrid, List } from 'lucide-react';
 
 // Raw schedule data
@@ -82,7 +82,6 @@ export default function App() {
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   const [activeMobileMonth, setActiveMobileMonth] = useState(0); // 0=Mar … 3=Jun
   const [isMobile, setIsMobile] = useState(false);
-  const miniCalendarRef = useRef(null);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1023px)');
@@ -138,24 +137,18 @@ export default function App() {
   const handleFixtureClick = (dateStr) => {
     setHighlightedDate(dateStr);
     if (isMobile) {
-      // Switch mini strip to correct month and expand the full calendar
+      // Just switch the mini strip to the correct month — no calendar expand
       const parsed = parseDate(dateStr);
       const idx = monthsToRender.findIndex(m => m.getMonth() === parsed.getMonth());
       if (idx >= 0) setActiveMobileMonth(idx);
-      setCalendarExpanded(true);
-      // Scroll the mini calendar strip into view first
-      miniCalendarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // After the expand animation (500ms), scroll to the specific date cell.
-      // The desktop calendar is display:none on mobile, so offsetParent===null for
-      // those hidden cells — querySelectorAll lets us find the visible one.
-      setTimeout(() => {
-        const allEls = document.querySelectorAll(`[id="cal-date-${dateStr}"]`);
-        const visibleEl = Array.from(allEls).find(el => el.offsetParent !== null);
-        if (visibleEl) visibleEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 550);
     } else {
-      const el = document.getElementById(`cal-date-${dateStr}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // The mobile expanded calendar renders the same renderMonth() and therefore
+      // produces duplicate cal-date-* IDs earlier in the DOM. getElementById finds
+      // those hidden elements first, making scrollIntoView a no-op. Use
+      // querySelectorAll + offsetParent to reach the visible desktop cell.
+      const allEls = document.querySelectorAll(`[id="cal-date-${dateStr}"]`);
+      const visibleEl = Array.from(allEls).find(el => el.offsetParent !== null);
+      if (visibleEl) visibleEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     setTimeout(() => setHighlightedDate(null), 2500);
   };
@@ -428,7 +421,7 @@ export default function App() {
         </div>
 
         {/* Mobile Mini Calendar Strip — hidden on desktop */}
-        <div ref={miniCalendarRef} className="lg:hidden mb-6">
+        <div className="lg:hidden mb-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
 
             {/* Month navigation */}
